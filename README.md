@@ -1,2 +1,3 @@
-# dirichlet_process
+# dirichlet_processes
+
 Implementations and experiments to understand the Dirichlet process.

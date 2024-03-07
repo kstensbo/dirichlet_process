@@ -1,0 +1,4 @@
+jax[cpu]
+ipython>=8.22.0
+matplotlib>=3.7.0
+numpy>=1.26.0
