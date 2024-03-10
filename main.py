@@ -7,6 +7,7 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 from jax import random
+from jax.typing import ArrayLike
 from matplotlib import cm
 
 from IPython import embed  # noqa: F401
@@ -15,15 +16,15 @@ jax.config.update("jax_enable_x64", True)
 # jax.config.update("jax_platform_name", "cpu")
 # jax.config.update("jax_disable_jit", True)
 
+KeyArray = ArrayLike
 
-def main() -> None:
-    seed = 0
-    key = random.PRNGKey(seed)
 
-    num_cdfs = 100
-
-    Kmax = 50
-    alpha = 10
+def dp_prior_draws(
+    key: KeyArray, Kmax: int, alpha: int, num_cdfs: int = 1
+) -> tuple[ArrayLike, ArrayLike]:
+    """
+    A truncated Dirichlet process prior based on Jordan & Teh (2015), Eq. (46).
+    """
 
     key, beta_key = random.split(key)
     betas = random.beta(beta_key, 1, alpha, shape=[num_cdfs, Kmax])
@@ -35,6 +36,20 @@ def main() -> None:
 
     key, normal_key = random.split(key)
     deltas = random.normal(normal_key, shape=[num_cdfs, Kmax])
+
+    return deltas, weights
+
+
+def main() -> None:
+    seed = 0
+    key = random.PRNGKey(seed)
+
+    num_cdfs = 100
+
+    Kmax = 50
+    alpha = 10
+
+    deltas, weights = dp_prior_draws(key, Kmax, alpha, num_cdfs)
 
     deltas = np.asarray(deltas)
     weights = np.asarray(weights)
