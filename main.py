@@ -89,13 +89,13 @@ def main() -> None:
     # True data distribution and samples:
     mean = 2
     var = 0.3
-    num_samples = 5
+    num_samples = 10
     samples = jnp.sqrt(var) * random.normal(subkey, shape=(num_samples,)) + mean
 
     num_cdfs = 100
 
     Kmax = 50
-    alpha = 10
+    alpha = 1
 
     key, prior_key, posterior_key = random.split(key, num=3)
     prior_deltas, prior_weights = dp_prior_draws(prior_key, Kmax, alpha, num_cdfs)
@@ -117,37 +117,60 @@ def main() -> None:
 
     for n, (d, w) in enumerate(zip(prior_deltas, prior_weights, strict=False)):
         ax.ecdf(
-            d, w, color=colormaps["Blues"](0.2 + 0.6 * (n / (num_cdfs - 1))), alpha=0.2
-        )
-        ax.vlines(
             d,
-            0,
             w,
             color=colormaps["Blues"](0.2 + 0.6 * (n / (num_cdfs - 1))),
-            alpha=0.2,
+            alpha=0.05 + 1 / num_cdfs,
         )
+        # ax.vlines(
+        #     d,
+        #     0,
+        #     w,
+        #     color=colormaps["Blues"](0.2 + 0.6 * (n / (num_cdfs - 1))),
+        #     alpha=0.2,
+        # )
 
     for n, (d, w) in enumerate(zip(posterior_deltas, posterior_weights, strict=False)):
         ax.ecdf(
-            d, w, color=colormaps["YlOrBr"](0.2 + 0.6 * (n / (num_cdfs - 1))), alpha=0.2
-        )
-        ax.vlines(
             d,
-            0,
             w,
-            color=colormaps["YlOrBr"](0.2 + 0.6 * (n / (num_cdfs - 1))),
-            alpha=0.2,
+            color=colormaps["YlOrBr"](0.2 + 0.5 * (n / (num_cdfs - 1))),
+            alpha=0.05 + 1 / num_cdfs,
         )
+        # ax.vlines(
+        #     d,
+        #     0,
+        #     w,
+        #     color=colormaps["YlOrBr"](0.2 + 0.6 * (n / (num_cdfs - 1))),
+        #     alpha=0.2,
+        # )
 
-    ax.plot(true_cdf_x, true_cdf, color="C3")
+    ax.ecdf(
+        np.ravel(prior_deltas),
+        np.ravel(prior_weights),
+        color="C0",
+        label="Mean prior CDF.",
+    )
+
+    ax.ecdf(
+        np.ravel(posterior_deltas),
+        np.ravel(posterior_weights),
+        color="C1",
+        label="Mean posterior CDF.",
+    )
+
+    ax.plot(true_cdf_x, true_cdf, color=colormaps["PuRd"](0.7))
+    # ax.plot(true_cdf_x, true_cdf, color=colormaps["Set1"](0))
 
     for i in range(num_samples):
         ax.axvline(
             samples[i],
             0,
             0.03,
-            linewidth=4,
-            color=colormaps["YlGn"](0.4 + 0.4 * i / (num_samples - 1)),
+            linewidth=2,
+            # color=colormaps["YlGn"](0.4 + 0.4 * i / (num_samples - 1)),
+            color=colormaps["RdPu"](0.4 + 0.4 * i / (num_samples - 1)),
+            alpha=0.7,
         )
 
     # ax.ecdf(deltas, weights, color="C1")
