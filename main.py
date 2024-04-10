@@ -1,3 +1,4 @@
+import argparse
 import os
 
 os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
@@ -82,25 +83,48 @@ def dp_posterior_draws(
 
 
 def main() -> None:
-    seed = 0
-    key = random.PRNGKey(seed)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--seed", type=int, default=0, help="Random seed.")
+    parser.add_argument(
+        "--true_mean", type=float, default=0, help="Mean of true distribution."
+    )
+    parser.add_argument(
+        "--true_var", type=float, default=1, help="Variance of true distribution."
+    )
+    parser.add_argument(
+        "--num_samples", type=int, default=10, help="Number of observed samples."
+    )
+    parser.add_argument(
+        "--num_cdfs", type=int, default=100, help="Number of drawn CDFs."
+    )
+    parser.add_argument("--Kmax", type=int, default=50, help="Number of DP steps.")
+    parser.add_argument(
+        "--alpha", type=int, default=1, help="DP concentration parameter."
+    )
+    parser.add_argument(
+        "--dist",
+        type=str,
+        choices=["normal", "beta"],
+        default="normal",
+        help="Type of true distribution.",
+    )
+    args = parser.parse_args()
+
+    key = random.PRNGKey(args.seed)
     key, subkey = random.split(key)
 
     # True data distribution and samples:
-    mean = 2
-    var = 0.3
-    num_samples = 10
-    samples = jnp.sqrt(var) * random.normal(subkey, shape=(num_samples,)) + mean
-
-    num_cdfs = 100
-
-    Kmax = 50
-    alpha = 1
+    samples = (
+        jnp.sqrt(args.true_var) * random.normal(subkey, shape=(args.num_samples,))
+        + args.true_mean
+    )
 
     key, prior_key, posterior_key = random.split(key, num=3)
-    prior_deltas, prior_weights = dp_prior_draws(prior_key, Kmax, alpha, num_cdfs)
+    prior_deltas, prior_weights = dp_prior_draws(
+        prior_key, args.Kmax, args.alpha, args.num_cdfs
+    )
     posterior_deltas, posterior_weights = dp_posterior_draws(
-        posterior_key, samples, Kmax, alpha, num_cdfs
+        posterior_key, samples, args.Kmax, args.alpha, args.num_cdfs
     )
 
     prior_deltas = np.asarray(prior_deltas)
@@ -111,7 +135,9 @@ def main() -> None:
     # print(f"Integral of CDFs: {np.sum(prior_weights, axis=1)}")
 
     true_cdf_x = jnp.linspace(-5, 5, 200)
-    true_cdf = jax.scipy.stats.norm.cdf(true_cdf_x, loc=mean, scale=jnp.sqrt(var))
+    true_cdf = jax.scipy.stats.norm.cdf(
+        true_cdf_x, loc=args.true_mean, scale=jnp.sqrt(args.true_var)
+    )
 
     ## The following is definitely not correct for the variance. Should somehow be
     ## integrated over the variance.
@@ -126,8 +152,8 @@ def main() -> None:
         ax.ecdf(
             d,
             w,
-            color=colormaps["Blues"](0.2 + 0.6 * (n / (num_cdfs - 1))),
-            alpha=0.05 + 1 / num_cdfs,
+            color=colormaps["Blues"](0.2 + 0.6 * (n / (args.num_cdfs - 1))),
+            alpha=0.05 + 1 / args.num_cdfs,
         )
         # ax.vlines(
         #     d,
@@ -141,8 +167,8 @@ def main() -> None:
         ax.ecdf(
             d,
             w,
-            color=colormaps["YlOrBr"](0.2 + 0.5 * (n / (num_cdfs - 1))),
-            alpha=0.05 + 1 / num_cdfs,
+            color=colormaps["YlOrBr"](0.2 + 0.5 * (n / (args.num_cdfs - 1))),
+            alpha=0.05 + 1 / args.num_cdfs,
         )
         # ax.vlines(
         #     d,
@@ -180,14 +206,14 @@ def main() -> None:
     # )
     # ax.plot(true_cdf_x, dp_mean, color="C0", alpha=0.7)
 
-    for i in range(num_samples):
+    for i in range(args.num_samples):
         ax.axvline(
             samples[i],
             0,
             0.03,
             linewidth=2,
             # color=colormaps["YlGn"](0.4 + 0.4 * i / (num_samples - 1)),
-            color=colormaps["RdPu"](0.4 + 0.4 * i / (num_samples - 1)),
+            color=colormaps["RdPu"](0.4 + 0.4 * i / (args.num_samples - 1)),
             alpha=0.7,
         )
 
