@@ -1,5 +1,7 @@
 import argparse
 import os
+from collections.abc import Callable, Sequence
+from typing import NamedTuple
 
 os.environ["XLA_FLAGS"] = "--xla_force_host_platform_device_count=8"
 
@@ -7,7 +9,7 @@ import jax
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
-from jax import random
+from jax import Array, random
 from jax.typing import ArrayLike
 from matplotlib import colormaps
 
@@ -18,17 +20,24 @@ jax.config.update("jax_enable_x64", True)
 # jax.config.update("jax_disable_jit", True)
 
 KeyArray = ArrayLike
+Shape = Sequence[int]
+
+
+class DPModel(NamedTuple):
+    alpha: float
+    Kmax: int
+    base_dist_sampler: Callable
 
 
 def dp_prior_draws(
-    key: KeyArray, Kmax: int, alpha: int, num_cdfs: int = 1
-) -> tuple[ArrayLike, ArrayLike]:
+    key: KeyArray, model: DPModel, num_cdfs: int = 1
+) -> tuple[Array, Array]:
     """
     A truncated Dirichlet process prior based on Jordan & Teh (2015), Eq. (46).
     """
 
     key, beta_key = random.split(key)
-    betas = random.beta(beta_key, 1, alpha, shape=[num_cdfs, Kmax])
+    betas = random.beta(beta_key, 1, model.alpha, shape=[num_cdfs, model.Kmax])
     betas = betas.at[:, -1].set(1)
 
     beta_prod = jnp.cumprod(1 - betas, axis=1)
@@ -36,61 +45,59 @@ def dp_prior_draws(
     weights = weights.at[:, 1:].set(betas[:, 1:] * beta_prod[:, :-1])
 
     key, normal_key = random.split(key)
-    deltas = random.normal(normal_key, shape=[num_cdfs, Kmax])
+    deltas = model.base_dist_sampler(normal_key, shape=[num_cdfs, model.Kmax])
 
     return deltas, weights
 
 
 def dp_posterior_draws(
-    key: KeyArray, observations: ArrayLike, Kmax: int, alpha: int, num_cdfs: int = 1
-) -> tuple[ArrayLike, ArrayLike]:
+    key: KeyArray,
+    observations: ArrayLike,
+    model: DPModel,
+    num_cdfs: int = 1,
+) -> tuple[Array, Array]:
     """
     A truncated Dirichlet process posterior based on Jordan & Teh (2015), Eq. (55).
     """
 
     N = observations.shape[0]
-    posterior_alpha = alpha + N
+    posterior_alpha = model.alpha + N
 
     key, subkey = random.split(key)
 
     # Sampling locations from the posterior:
-    sample_probabilities = jnp.array([alpha / (alpha + N)] + N * [1 / (alpha + N)])
+    sample_probabilities = jnp.array(
+        [model.alpha / (model.alpha + N)] + N * [1 / (model.alpha + N)]
+    )
     deltas = random.choice(
         subkey,
         jnp.array([jnp.nan, *observations]),
-        shape=[num_cdfs, Kmax],
+        shape=[num_cdfs, model.Kmax],
         p=sample_probabilities,
     )
     # num_base_measure_samples = int(jnp.isnan(deltas).sum())
-    base_deltas = random.normal(
+    base_deltas = model.base_dist_sampler(
         subkey,
         # shape=[num_base_measure_samples],
-        shape=[num_cdfs, Kmax],
+        shape=[num_cdfs, model.Kmax],
     )
 
     # deltas = deltas.at[jnp.argwhere(jnp.isnan(deltas))].set(base_deltas)
     deltas = jnp.where(jnp.isnan(deltas), base_deltas, deltas)
 
     key, beta_key = random.split(key)
-    betas = random.beta(beta_key, 1, posterior_alpha, shape=[num_cdfs, Kmax])
+    betas = random.beta(beta_key, 1, posterior_alpha, shape=[num_cdfs, model.Kmax])
     betas = betas.at[:, -1].set(1)
 
     beta_prod = jnp.cumprod(1 - betas, axis=1)
-    weights = betas
-    weights = weights.at[:, 1:].set(betas[:, 1:] * beta_prod[:, :-1])
+    weights = betas.at[:, 1:].set(betas[:, 1:] * beta_prod[:, :-1])
 
     return deltas, weights
 
 
-def main() -> None:
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=0, help="Random seed.")
-    parser.add_argument(
-        "--true_mean", type=float, default=0, help="Mean of true distribution."
-    )
-    parser.add_argument(
-        "--true_var", type=float, default=1, help="Variance of true distribution."
-    )
     parser.add_argument(
         "--num_samples", type=int, default=10, help="Number of observed samples."
     )
@@ -102,29 +109,120 @@ def main() -> None:
         "--alpha", type=int, default=1, help="DP concentration parameter."
     )
     parser.add_argument(
-        "--dist",
+        "--true_dist",
         type=str,
         choices=["normal", "beta"],
         default="normal",
         help="Type of true distribution.",
     )
+    parser.add_argument(
+        "--true_normal_mean",
+        type=float,
+        default=0,
+        help="Mean of true normal distribution.",
+    )
+    parser.add_argument(
+        "--true_normal_var",
+        type=float,
+        default=1,
+        help="Variance of true normal distribution.",
+    )
+    parser.add_argument(
+        "--true_beta_a", type=float, default=1, help="Beta parameter a."
+    )
+    parser.add_argument(
+        "--true_beta_b", type=float, default=1, help="Beta parameter b."
+    )
+    parser.add_argument(
+        "--base_dist",
+        type=str,
+        choices=["normal", "beta"],
+        default="normal",
+        help="Type of base distribution.",
+    )
+    parser.add_argument(
+        "--base_normal_mean",
+        type=float,
+        default=0,
+        help="Mean of base normal distribution.",
+    )
+    parser.add_argument(
+        "--base_normal_var",
+        type=float,
+        default=1,
+        help="Variance of base normal distribution.",
+    )
+    parser.add_argument(
+        "--base_beta_a", type=float, default=1, help="Base beta parameter a."
+    )
+    parser.add_argument(
+        "--base_beta_b", type=float, default=1, help="Base beta parameter b."
+    )
     args = parser.parse_args()
+
+    return args
+
+
+def get_observations_and_true_cdf(
+    key: KeyArray, args: argparse.Namespace
+) -> tuple[Array, Array, Array]:
+    # True data distribution and samples:
+    if args.true_dist == "normal":
+        true_cdf_x = jnp.linspace(-5, 5, 200)
+        samples = (
+            jnp.sqrt(args.true_normal_var)
+            * random.normal(key, shape=(args.num_samples,))
+            + args.true_normal_mean
+        )
+        true_cdf = jax.scipy.stats.norm.cdf(
+            true_cdf_x, loc=args.true_normal_mean, scale=jnp.sqrt(args.true_normal_var)
+        )
+    elif args.true_dist == "beta":
+        true_cdf_x = jnp.linspace(0, 1, 200)
+        samples = random.beta(
+            key, args.true_beta_a, args.true_beta_b, shape=(args.num_samples,)
+        )
+        true_cdf = jax.scipy.stats.beta.cdf(
+            true_cdf_x, args.true_beta_a, args.true_beta_b
+        )
+    else:
+        error_message = f"Unknown distribution: {args.dist}"
+        raise ValueError(error_message)
+
+    return samples, true_cdf_x, true_cdf
+
+
+def main() -> None:
+    args = parse_args()
 
     key = random.PRNGKey(args.seed)
     key, subkey = random.split(key)
 
-    # True data distribution and samples:
-    samples = (
-        jnp.sqrt(args.true_var) * random.normal(subkey, shape=(args.num_samples,))
-        + args.true_mean
+    samples, true_cdf_x, true_cdf = get_observations_and_true_cdf(subkey, args)
+
+    # Base distribution:
+    def base_dist_sampler(key: KeyArray, shape: Shape) -> ArrayLike:
+        if args.base_dist == "normal":
+            samples = (
+                jnp.sqrt(args.base_normal_var) * random.normal(key=key, shape=shape)
+                + args.base_normal_mean
+            )
+        elif args.base_dist == "beta":
+            samples = random.beta(key, args.base_beta_a, args.base_beta_b, shape=shape)
+        else:
+            error_message = f"Unknown base distribution: {args.base_dist}"
+            raise ValueError(error_message)
+
+        return samples
+
+    prior_dp = DPModel(
+        alpha=args.alpha, Kmax=args.Kmax, base_dist_sampler=base_dist_sampler
     )
 
     key, prior_key, posterior_key = random.split(key, num=3)
-    prior_deltas, prior_weights = dp_prior_draws(
-        prior_key, args.Kmax, args.alpha, args.num_cdfs
-    )
+    prior_deltas, prior_weights = dp_prior_draws(prior_key, prior_dp, args.num_cdfs)
     posterior_deltas, posterior_weights = dp_posterior_draws(
-        posterior_key, samples, args.Kmax, args.alpha, args.num_cdfs
+        posterior_key, samples, prior_dp, args.num_cdfs
     )
 
     prior_deltas = np.asarray(prior_deltas)
@@ -133,11 +231,6 @@ def main() -> None:
     posterior_weights = np.asarray(posterior_weights)
 
     # print(f"Integral of CDFs: {np.sum(prior_weights, axis=1)}")
-
-    true_cdf_x = jnp.linspace(-5, 5, 200)
-    true_cdf = jax.scipy.stats.norm.cdf(
-        true_cdf_x, loc=args.true_mean, scale=jnp.sqrt(args.true_var)
-    )
 
     ## The following is definitely not correct for the variance. Should somehow be
     ## integrated over the variance.
