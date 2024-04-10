@@ -113,6 +113,13 @@ def main() -> None:
     true_cdf_x = jnp.linspace(-5, 5, 200)
     true_cdf = jax.scipy.stats.norm.cdf(true_cdf_x, loc=mean, scale=jnp.sqrt(var))
 
+    ## The following is definitely not correct for the variance. Should somehow be
+    ## integrated over the variance.
+    ## Eq. (50), Jordan & Teh (2015)
+    # dp_mean = jax.scipy.stats.norm.cdf(true_cdf_x, loc=0, scale=1)
+    ## Eq. (51), Jordan & Teh (2015)
+    # dp_var = dp_mean * (1 - dp_mean) / (1 + alpha)
+
     _, ax = plt.subplots()
 
     for n, (d, w) in enumerate(zip(prior_deltas, prior_weights, strict=False)):
@@ -162,6 +169,17 @@ def main() -> None:
     ax.plot(true_cdf_x, true_cdf, color=colormaps["PuRd"](0.7))
     # ax.plot(true_cdf_x, true_cdf, color=colormaps["Set1"](0))
 
+    ## Analytic mean and standard deviations of the prior DP:
+    # ax.fill_between(
+    #    true_cdf_x,
+    #    dp_mean - jnp.sqrt(dp_var),
+    #    dp_mean + jnp.sqrt(dp_var),
+    #    color="C0",
+    #    alpha=0.2,
+    #    edgecolor="none",
+    # )
+    # ax.plot(true_cdf_x, dp_mean, color="C0", alpha=0.7)
+
     for i in range(num_samples):
         ax.axvline(
             samples[i],
@@ -177,6 +195,7 @@ def main() -> None:
     # ax.vlines(deltas, 0, weights, color="C0")
 
     ax.set_ylim(bottom=0)
+    ax.set_xlim(left=true_cdf_x.min(), right=true_cdf_x.max())
 
     plt.show()
 
